@@ -1,0 +1,1292 @@
+<?php
+/**
+ * ============================================================
+ *  CyberSafe — Cybersecurity Awareness Website for Students
+ *  Single-file version (config + DB + routes + views + CSS)
+ *  Stack: PHP 8+ / MySQL / no frameworks
+ * ============================================================
+ */
+declare(strict_types=1);
+session_start();
+
+/* ============================================================
+   1. CONFIG  (edit these if needed)
+   ============================================================ */
+const DB_HOST = 'localhost';
+const DB_NAME = 'cybersafe';
+const DB_USER = 'root';
+const DB_PASS = '';
+
+/* ============================================================
+   2. DATABASE CONNECT + AUTO-INSTALL
+   ============================================================ */
+try {
+    $pdo = new PDO(
+        'mysql:host=' . DB_HOST . ';charset=utf8mb4',
+        DB_USER, DB_PASS,
+        [
+            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            PDO::ATTR_EMULATE_PREPARES   => false,
+        ]
+    );
+} catch (PDOException $e) {
+    die('<h2>Database connection failed</h2><p>Start MySQL in XAMPP, then reload. Details: <code>'
+        . htmlspecialchars($e->getMessage()) . '</code></p>');
+}
+
+$pdo->exec("CREATE DATABASE IF NOT EXISTS `" . DB_NAME . "` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+$pdo->exec("USE `" . DB_NAME . "`");
+
+/* Check if already installed */
+$needsInstall = false;
+try { $pdo->query('SELECT 1 FROM users LIMIT 1'); }
+catch (PDOException $e) { $needsInstall = true; }
+
+if ($needsInstall) {
+    /* ---------- TABLES ---------- */
+    $pdo->exec("CREATE TABLE IF NOT EXISTS users (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        email VARCHAR(150) NOT NULL UNIQUE,
+        password_hash VARCHAR(255) NOT NULL,
+        role ENUM('student','admin') NOT NULL DEFAULT 'student',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS modules (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        title VARCHAR(150) NOT NULL,
+        content TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS tips (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        category VARCHAR(80) NOT NULL,
+        tip TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS quizzes (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        title VARCHAR(150) NOT NULL,
+        description VARCHAR(255) DEFAULT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS questions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        quiz_id INT NOT NULL,
+        question TEXT NOT NULL,
+        option_a VARCHAR(255) NOT NULL,
+        option_b VARCHAR(255) NOT NULL,
+        option_c VARCHAR(255) NOT NULL,
+        option_d VARCHAR(255) NOT NULL,
+        correct_option CHAR(1) NOT NULL,
+        FOREIGN KEY (quiz_id) REFERENCES quizzes(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS results (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        quiz_id INT NOT NULL,
+        score INT NOT NULL,
+        total INT NOT NULL,
+        taken_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (quiz_id) REFERENCES quizzes(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    /* ---------- DEMO ACCOUNTS ---------- */
+    $stmt = $pdo->prepare('INSERT INTO users (name, email, password_hash, role) VALUES (?,?,?,?)');
+    $stmt->execute(['Site Administrator', 'admin@cybersafe.test',   password_hash('admin123',   PASSWORD_DEFAULT), 'admin']);
+    $stmt->execute(['Demo Student',       'student@cybersafe.test', password_hash('student123', PASSWORD_DEFAULT), 'student']);
+
+    /* ---------- SEED: MODULES ---------- */
+    $mods = [
+        ['Phishing and Online Scams',
+"Phishing is a type of social engineering attack where criminals pretend to be a trusted person or organisation in order to trick you into revealing passwords, OTP codes, or bank details.
+
+These messages almost always create a sense of urgency so that you act before you think.
+
+COMMON WARNING SIGNS
+- Unexpected messages asking you to verify or confirm your account
+- Links whose domain does not match the official website
+- Spelling and grammar errors
+- Requests for OTP codes, passwords, or payment
+- Attachments you were not expecting
+
+WHAT TO DO
+1. Never click links in suspicious messages.
+2. Open the official website or app directly instead.
+3. Verify the sender through another channel.
+4. Report and delete the message.
+
+Remember: legitimate banks and schools will never ask for your password or one-time PIN."],
+
+        ['Strong Passwords and Account Security',
+"A password is the key to your digital life. Weak or reused passwords are the number one reason accounts get compromised.
+
+BUILD A STRONG PASSCODE
+- Use a passphrase of four unrelated words, for example: purple-Elephant-Sunset-9
+- Aim for at least 12 characters
+- Mix letters, numbers and symbols
+
+NEVER DO THIS
+- Never reuse the same password on multiple accounts
+- Never share your password or OTP code with anyone
+- Never save passwords on shared or laboratory computers
+
+GO FURTHER
+- Enable two-factor authentication (2FA) on email, social media, and school accounts
+- Use a reputable password manager
+- Change your password immediately if a service reports a data breach"],
+
+        ['Protecting Your Personal Information',
+"Personal data includes your full name, address, phone number, student ID, birthday, photos and location.
+
+THINK BEFORE YOU POST
+- Screenshots, ID cards, boarding passes and class schedules can reveal far more than you expect
+- Blur or crop any document numbers before posting
+- Avoid posting your real-time location
+
+CONTROL YOUR AUDIENCE
+- Review your social media privacy settings regularly
+- Accept friend requests only from people you actually know
+- Be careful with apps that request access to your contacts, camera, microphone or location
+
+YOUR RIGHTS
+Under the Data Privacy Act (RA 10173) you have the right to be informed, to object, to access, to correct, and to erasure of your personal data."],
+
+        ['Ethical and Responsible Internet Use',
+"Responsible use means respecting other people online and using technology for good.
+
+DO NOT
+- Spread unverified information or fake news
+- Engage in cyberbullying, harassment or doxxing
+- Share the private information of other people without consent
+- Copy work without giving credit
+- Use your technical skills to access systems without permission
+
+The same laws apply online as offline. Defamation, threats, identity theft and unauthorised access are punishable under Philippine law.
+
+AS AN IT STUDENT
+You have a special responsibility. The skills you learn can protect people or harm them. Ethical professionals ask permission, protect data, disclose conflicts of interest, and refuse to build systems that harm others. Choose to protect."],
+    ];
+    $stmt = $pdo->prepare('INSERT INTO modules (title, content) VALUES (?, ?)');
+    foreach ($mods as $m) $stmt->execute($m);
+
+    /* ---------- SEED: TIPS ---------- */
+    $tips = [
+        ['Password Safety', 'Use a four-word passphrase such as blue-Otter-Cable-42 instead of a single word.'],
+        ['Password Safety', 'Turn on two-factor authentication for your email and social media accounts.'],
+        ['Password Safety', 'Never reuse your school password on other websites.'],
+        ['Privacy',         'Review your social media privacy settings at least once a month.'],
+        ['Privacy',         'Blur your student ID, plate number and address before posting photos.'],
+        ['Browsing',        'Check the exact domain name and the padlock before typing a password.'],
+        ['Browsing',        'Avoid entering personal details on public Wi-Fi; use mobile data for banking.'],
+        ['Social Media',    'Accept friend requests only from people you actually know.'],
+        ['Scams',           'If an offer sounds too good to be true, it is a scam. Stop, check and report.'],
+    ];
+    $stmt = $pdo->prepare('INSERT INTO tips (category, tip) VALUES (?, ?)');
+    foreach ($tips as $t) $stmt->execute($t);
+
+    /* ---------- SEED: QUIZZES + QUESTIONS ---------- */
+    $pdo->prepare('INSERT INTO quizzes (title, description) VALUES (?, ?)')
+        ->execute(['Cybersecurity Basics', 'Test your knowledge of phishing, passwords and online safety.']);
+    $q1 = (int)$pdo->lastInsertId();
+
+    $pdo->prepare('INSERT INTO quizzes (title, description) VALUES (?, ?)')
+        ->execute(['Password and Privacy Check', 'A short check on password hygiene and personal data protection.']);
+    $q2 = (int)$pdo->lastInsertId();
+
+    $stmt = $pdo->prepare('INSERT INTO questions
+        (quiz_id, question, option_a, option_b, option_c, option_d, correct_option)
+        VALUES (?,?,?,?,?,?,?)');
+
+    $questionsQ1 = [
+        ['Which of these is the strongest password?', '12345678', 'juan2005', 'purple-Elephant-Sunset-9', 'qwerty', 'C'],
+        ['You receive an email saying your account will be closed in 24 hours unless you click a link and confirm your password. What should you do?', 'Click the link immediately', 'Reply with your password', 'Open the official website directly and check your account', 'Forward it to your friends', 'C'],
+        ['What does two-factor authentication (2FA) add to your account?', 'A second password that never changes', 'A second verification step such as a code sent to your phone', 'A stronger antivirus program', 'A backup email address only', 'B'],
+        ['Which of the following is safe to post publicly?', 'A photo of your student ID card', 'Your complete home address', 'Your favourite movie', 'A photo of your boarding pass', 'C'],
+        ['A stranger online asks for your OTP to verify a delivery. You should:', 'Send it, it is just a code', 'Never share the OTP and report the message', 'Share only half of the code', 'Ask them to call you first', 'B'],
+    ];
+    foreach ($questionsQ1 as $row) $stmt->execute([$q1, ...$row]);
+
+    $questionsQ2 = [
+        ['How often should you reuse a password across accounts?', 'Always', 'Only on unimportant sites', 'Never', 'Once a year', 'C'],
+        ['What is the safest way to store many strong passwords?', 'A notebook in your bag', 'A reputable password manager', 'A spreadsheet on your desktop', 'The same password everywhere', 'B'],
+        ['A free quiz website asks for your exact GPS location. Best response?', 'Allow always', 'Deny, or allow only while using if truly needed', 'Allow and also share your contacts', 'Allow because the site is free', 'B'],
+        ['What should you do before posting a photo where your school ID is visible?', 'Post it, it is fine', 'Blur or crop the ID', 'Post it only at night', 'Add your address in the caption', 'B'],
+        ['Under the Data Privacy Act, you have the right to:', 'Access and correct your personal data', 'Delete other people accounts', 'Use the personal data of others freely', 'Ignore privacy notices', 'A'],
+    ];
+    foreach ($questionsQ2 as $row) $stmt->execute([$q2, ...$row]);
+}
+
+/* ============================================================
+   3. HELPERS
+   ============================================================ */
+$SELF = $_SERVER['PHP_SELF'] ?? 'index.php';
+
+function e($v) { return htmlspecialchars((string)($v ?? ''), ENT_QUOTES, 'UTF-8'); }
+
+function url($page = 'home', array $params = []) {
+    global $SELF;
+    $q = array_merge(['page' => $page], $params);
+    return $SELF . '?' . http_build_query($q);
+}
+function redirect_to($page, array $params = []) {
+    header('Location: ' . url($page, $params));
+    exit;
+}
+function is_logged_in(): bool { return !empty($_SESSION['user_id']); }
+function is_admin(): bool     { return (($_SESSION['role'] ?? '') === 'admin'); }
+
+function require_login() {
+    if (!is_logged_in()) { flash('Please log in first.'); redirect_to('login'); }
+}
+function require_admin() {
+    if (!is_logged_in()) { flash('Please log in as an administrator.'); redirect_to('login'); }
+    if (!is_admin())     { flash('Administrator access only.'); redirect_to('home'); }
+}
+function flash($msg = null) {
+    if ($msg === null) { $m = $_SESSION['flash'] ?? null; unset($_SESSION['flash']); return $m; }
+    $_SESSION['flash'] = $msg;
+}
+function csrf_token(): string {
+    if (empty($_SESSION['csrf'])) $_SESSION['csrf'] = bin2hex(random_bytes(16));
+    return $_SESSION['csrf'];
+}
+function csrf_field(): string {
+    return '<input type="hidden" name="csrf" value="' . e(csrf_token()) . '">';
+}
+function csrf_check() {
+    if (!hash_equals($_SESSION['csrf'] ?? '', $_POST['csrf'] ?? '')) {
+        http_response_code(419);
+        die('Invalid security token. Go back and try again.');
+    }
+}
+
+/* ============================================================
+   4. ROUTE + PAGE TITLE
+   ============================================================ */
+$page = $_GET['page'] ?? 'home';
+$pageTitles = [
+    'home'             => 'Home',
+    'register'         => 'Register',
+    'login'            => 'Login',
+    'modules'          => 'Learning Modules',
+    'module'           => 'Module',
+    'tips'             => 'Safety Tips',
+    'quiz'             => 'Quizzes',
+    'my_results'       => 'My Results',
+    'admin'            => 'Admin Dashboard',
+    'admin_modules'    => 'Manage Modules',
+    'admin_tips'       => 'Manage Tips',
+    'admin_quizzes'    => 'Manage Quizzes',
+    'admin_questions'  => 'Manage Questions',
+];
+$pageTitle = $pageTitles[$page] ?? 'CyberSafe';
+
+/* ============================================================
+   5. POST HANDLERS
+   ============================================================ */
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+
+    /* -------- REGISTER -------- */
+    if ($page === 'register') {
+        csrf_check();
+        $name  = trim($_POST['name']  ?? '');
+        $email = trim($_POST['email'] ?? '');
+        $pass  = $_POST['password']  ?? '';
+        $pass2 = $_POST['password2'] ?? '';
+        $errs = [];
+
+        if (mb_strlen($name) < 2)                 $errs[] = 'Please enter your full name.';
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) $errs[] = 'Please enter a valid email.';
+        if (strlen($pass) < 8)                    $errs[] = 'Password must be at least 8 characters.';
+        if ($pass !== $pass2)                     $errs[] = 'Passwords do not match.';
+
+        if (!$errs) {
+            $st = $pdo->prepare('SELECT id FROM users WHERE email = ?');
+            $st->execute([$email]);
+            if ($st->fetch()) $errs[] = 'That email is already registered.';
+        }
+        if ($errs) {
+            $_SESSION['register_errors'] = $errs;
+            $_SESSION['register_old']    = ['name' => $name, 'email' => $email];
+        } else {
+            $st = $pdo->prepare('INSERT INTO users (name, email, password_hash) VALUES (?,?,?)');
+            $st->execute([$name, $email, password_hash($pass, PASSWORD_DEFAULT)]);
+            flash('Account created successfully. You may now log in.');
+            redirect_to('login');
+        }
+        redirect_to('register');
+    }
+
+    /* -------- LOGIN -------- */
+    if ($page === 'login') {
+        csrf_check();
+        $email = trim($_POST['email'] ?? '');
+        $pass  = $_POST['password'] ?? '';
+        $st = $pdo->prepare('SELECT * FROM users WHERE email = ?');
+        $st->execute([$email]);
+        $u = $st->fetch();
+        if ($u && password_verify($pass, $u['password_hash'])) {
+            session_regenerate_id(true);
+            $_SESSION['user_id'] = (int)$u['id'];
+            $_SESSION['name']    = $u['name'];
+            $_SESSION['role']    = $u['role'];
+            flash('Welcome back, ' . $u['name'] . '!');
+            redirect_to(is_admin() ? 'admin' : 'home');
+        }
+        $_SESSION['login_error'] = 'Incorrect email or password.';
+        $_SESSION['login_old']   = $email;
+        redirect_to('login');
+    }
+
+    /* -------- QUIZ SUBMIT -------- */
+    if ($page === 'quiz' && isset($_POST['quiz_id'])) {
+        csrf_check();
+        $quizId = (int)$_POST['quiz_id'];
+        $st = $pdo->prepare('SELECT * FROM quizzes WHERE id = ?');
+        $st->execute([$quizId]);
+        $quiz = $st->fetch();
+        if (!$quiz) { flash('Quiz not found.'); redirect_to('quiz'); }
+
+        $st = $pdo->prepare('SELECT * FROM questions WHERE quiz_id = ? ORDER BY id');
+        $st->execute([$quizId]);
+        $questions = $st->fetchAll();
+
+        $answers = is_array($_POST['q'] ?? null) ? $_POST['q'] : [];
+        $score = 0; $review = [];
+        foreach ($questions as $q) {
+            $given = strtoupper(trim((string)($answers[$q['id']] ?? '')));
+            $ok    = ($given === strtoupper($q['correct_option']));
+            if ($ok) $score++;
+            $review[] = ['q' => $q, 'given' => $given, 'ok' => $ok];
+        }
+        $total = count($questions);
+
+        if (is_logged_in() && $total > 0) {
+            $pdo->prepare('INSERT INTO results (user_id, quiz_id, score, total) VALUES (?,?,?,?)')
+                ->execute([$_SESSION['user_id'], $quizId, $score, $total]);
+        }
+        $_SESSION['quiz_result'] = compact('quiz', 'score', 'total', 'review');
+        redirect_to('quiz', ['result' => 1]);
+    }
+
+    /* -------- ADMIN: MODULES -------- */
+    if ($page === 'admin_modules') {
+        require_admin(); csrf_check();
+        $action = $_POST['action'] ?? '';
+        if ($action === 'save') {
+            $id      = (int)($_POST['id'] ?? 0);
+            $title   = trim($_POST['title']   ?? '');
+            $content = trim($_POST['content'] ?? '');
+            if ($title === '' || $content === '') {
+                flash('Title and content are required.');
+            } elseif ($id > 0) {
+                $pdo->prepare('UPDATE modules SET title=?, content=? WHERE id=?')
+                    ->execute([$title, $content, $id]);
+                flash('Module updated.');
+            } else {
+                $pdo->prepare('INSERT INTO modules (title, content) VALUES (?,?)')
+                    ->execute([$title, $content]);
+                flash('Module added.');
+            }
+        } elseif ($action === 'delete') {
+            $pdo->prepare('DELETE FROM modules WHERE id = ?')->execute([(int)$_POST['id']]);
+            flash('Module deleted.');
+        }
+        redirect_to('admin_modules');
+    }
+
+    /* -------- ADMIN: TIPS -------- */
+    if ($page === 'admin_tips') {
+        require_admin(); csrf_check();
+        $action = $_POST['action'] ?? '';
+        if ($action === 'save') {
+            $id       = (int)($_POST['id'] ?? 0);
+            $category = trim($_POST['category'] ?? '');
+            $tip      = trim($_POST['tip']      ?? '');
+            if ($category === '' || $tip === '') {
+                flash('Category and tip are required.');
+            } elseif ($id > 0) {
+                $pdo->prepare('UPDATE tips SET category=?, tip=? WHERE id=?')
+                    ->execute([$category, $tip, $id]);
+                flash('Tip updated.');
+            } else {
+                $pdo->prepare('INSERT INTO tips (category, tip) VALUES (?,?)')
+                    ->execute([$category, $tip]);
+                flash('Tip added.');
+            }
+        } elseif ($action === 'delete') {
+            $pdo->prepare('DELETE FROM tips WHERE id = ?')->execute([(int)$_POST['id']]);
+            flash('Tip deleted.');
+        }
+        redirect_to('admin_tips');
+    }
+
+    /* -------- ADMIN: QUIZZES -------- */
+    if ($page === 'admin_quizzes') {
+        require_admin(); csrf_check();
+        $action = $_POST['action'] ?? '';
+        if ($action === 'save') {
+            $id          = (int)($_POST['id'] ?? 0);
+            $title       = trim($_POST['title']       ?? '');
+            $description = trim($_POST['description'] ?? '');
+            if ($title === '') {
+                flash('Quiz title is required.');
+            } elseif ($id > 0) {
+                $pdo->prepare('UPDATE quizzes SET title=?, description=? WHERE id=?')
+                    ->execute([$title, $description, $id]);
+                flash('Quiz updated.');
+            } else {
+                $pdo->prepare('INSERT INTO quizzes (title, description) VALUES (?,?)')
+                    ->execute([$title, $description]);
+                flash('Quiz added.');
+            }
+        } elseif ($action === 'delete') {
+            $pdo->prepare('DELETE FROM quizzes WHERE id = ?')->execute([(int)$_POST['id']]);
+            flash('Quiz deleted.');
+        }
+        redirect_to('admin_quizzes');
+    }
+
+    /* -------- ADMIN: QUESTIONS -------- */
+    if ($page === 'admin_questions') {
+        require_admin(); csrf_check();
+        $action = $_POST['action'] ?? '';
+        $quizId = (int)($_POST['quiz_id'] ?? 0);
+
+        if ($action === 'save') {
+            $id   = (int)($_POST['id'] ?? 0);
+            $row  = [
+                trim($_POST['question'] ?? ''),
+                trim($_POST['option_a'] ?? ''),
+                trim($_POST['option_b'] ?? ''),
+                trim($_POST['option_c'] ?? ''),
+                trim($_POST['option_d'] ?? ''),
+                strtoupper(trim($_POST['correct_option'] ?? 'A')),
+            ];
+            if (in_array('', $row, true)) {
+                flash('All fields are required.');
+            } elseif (!in_array($row[5], ['A','B','C','D'], true)) {
+                flash('Correct answer must be A, B, C or D.');
+            } elseif ($id > 0) {
+                $pdo->prepare('UPDATE questions SET question=?, option_a=?, option_b=?,
+                               option_c=?, option_d=?, correct_option=?
+                               WHERE id=? AND quiz_id=?')
+                    ->execute([...$row, $id, $quizId]);
+                flash('Question updated.');
+            } else {
+                $pdo->prepare('INSERT INTO questions
+                    (question, option_a, option_b, option_c, option_d, correct_option, quiz_id)
+                    VALUES (?,?,?,?,?,?,?)')
+                    ->execute([...$row, $quizId]);
+                flash('Question added.');
+            }
+        } elseif ($action === 'delete') {
+            $pdo->prepare('DELETE FROM questions WHERE id = ? AND quiz_id = ?')
+                ->execute([(int)$_POST['id'], $quizId]);
+            flash('Question deleted.');
+        }
+        redirect_to('admin_questions', ['quiz_id' => $quizId]);
+    }
+}
+
+/* ============================================================
+   6. LOGOUT
+   ============================================================ */
+if ($page === 'logout') {
+    $_SESSION = [];
+    session_destroy();
+    session_start();
+    flash('You have been logged out.');
+    redirect_to('home');
+}
+
+/* ============================================================
+   7. RENDER HEADER
+   ============================================================ */
+function render_header(string $pageTitle) {
+    ?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title><?= e($pageTitle) ?> — CyberSafe</title>
+<style>
+:root{
+  --bg:#0b1220; --panel:#121c2e; --panel2:#0f1829; --line:#22304a;
+  --text:#e6edf7; --muted:#93a4c0;
+  --accent:#22d3ee; --accent2:#3b82f6; --ok:#22c55e; --bad:#ef4444;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);line-height:1.65;
+     font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+.wrap{max-width:1000px;margin:0 auto;padding:0 20px}
+h1,h2,h3{line-height:1.25;margin:0 0 .5em}
+h1{font-size:2rem}
+.muted{color:var(--muted);font-size:.9rem}
+.site-header{background:rgba(15,24,41,.95);border-bottom:1px solid var(--line);
+             position:sticky;top:0;z-index:10;backdrop-filter:blur(6px)}
+.nav{display:flex;flex-wrap:wrap;gap:14px;align-items:center;justify-content:space-between;
+     padding:12px 20px}
+.brand{font-weight:700;font-size:1.15rem;color:var(--text)}
+.nav nav{display:flex;flex-wrap:wrap;gap:16px;align-items:center}
+.nav nav a{color:var(--muted);font-size:.94rem}
+.nav nav a:hover{color:var(--accent);text-decoration:none}
+.who{color:var(--muted);font-size:.85rem}
+.btn{display:inline-block;background:linear-gradient(135deg,var(--accent),var(--accent2));
+     color:#04121f;font-weight:700;border:0;border-radius:10px;padding:11px 20px;
+     cursor:pointer;font-size:.95rem}
+.btn:hover{opacity:.9;text-decoration:none}
+.btn.small{padding:7px 14px;font-size:.85rem}
+.btn.danger{background:#3a1720;color:#ffb4c0;border:1px solid #63263a}
+.btn.ghost{background:transparent;border:1px solid var(--line);color:var(--text)}
+main{padding:32px 20px 60px;min-height:60vh}
+.hero{background:radial-gradient(1000px 400px at 10% -20%,rgba(34,211,238,.18),transparent),
+       var(--panel);border:1px solid var(--line);border-radius:18px;padding:36px;margin-bottom:28px}
+.hero p{color:var(--muted);max-width:640px}
+.hero-actions{margin-top:20px;display:flex;gap:12px;flex-wrap:wrap}
+.grid{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px}
+.card h3{margin-top:0;color:var(--accent);font-size:1.05rem}
+.card p{margin:0;color:var(--muted);font-size:.92rem}
+.card .icon{font-size:1.6rem;display:block;margin-bottom:8px}
+.section{margin-bottom:34px}
+.section > h2{font-size:1.35rem}
+.list{list-style:none;padding:0;margin:0;display:grid;gap:14px}
+.list li{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+.list h3{margin:0 0 6px;font-size:1.05rem}
+.list h3 a{color:var(--text)}
+.list h3 a:hover{color:var(--accent);text-decoration:none}
+.form{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+      padding:22px;max-width:640px}
+.field{margin-bottom:16px}
+.field label{display:block;margin-bottom:6px;font-size:.9rem;color:var(--muted)}
+input[type=text],input[type=email],input[type=password],select,textarea{
+  width:100%;padding:11px 13px;border-radius:10px;border:1px solid var(--line);
+  background:var(--panel2);color:var(--text);font:inherit;font-size:.95rem}
+input:focus,select:focus,textarea:focus{outline:2px solid rgba(34,211,238,.4);border-color:var(--accent)}
+textarea{min-height:140px;resize:vertical}
+.alert{background:#0f2c33;border:1px solid #1c5a66;color:#a9ecf5;
+       padding:12px 16px;border-radius:10px;margin-bottom:20px}
+.errors{background:#331318;border:1px solid #6b2430;color:#ffc2cb;
+        padding:12px 16px;border-radius:10px;margin-bottom:18px}
+.errors ul{margin:0;padding-left:20px}
+.q{border:1px solid var(--line);background:var(--panel);border-radius:12px;
+   padding:16px 18px;margin-bottom:16px}
+.q legend{font-weight:600;padding:0 6px;color:var(--text)}
+.opt{display:flex;gap:10px;align-items:flex-start;padding:8px 4px;cursor:pointer;
+     border-radius:8px;font-size:.95rem}
+.opt:hover{background:rgba(34,211,238,.06)}
+.opt input{margin-top:6px;accent-color:var(--accent)}
+.score{font-size:3rem;font-weight:800;margin:0;color:var(--accent)}
+.badge{display:inline-block;padding:3px 10px;border-radius:999px;font-size:.78rem;font-weight:700}
+.badge.ok{background:rgba(34,197,94,.15);color:#7ee2a8}
+.badge.bad{background:rgba(239,68,68,.15);color:#ff9aa5}
+table{width:100%;border-collapse:collapse;font-size:.92rem}
+th,td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line)}
+th{color:var(--muted);font-weight:600;font-size:.82rem;text-transform:uppercase;letter-spacing:.04em}
+tr:hover td{background:rgba(255,255,255,.02)}
+.admin-nav{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:24px}
+.admin-nav a{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+             padding:8px 16px;font-size:.9rem;color:var(--muted)}
+.admin-nav a:hover{border-color:var(--accent);color:var(--accent);text-decoration:none}
+.site-footer{border-top:1px solid var(--line);padding:24px 0;text-align:center;
+             color:var(--muted);font-size:.85rem;background:var(--panel2)}
+.site-footer p{margin:4px 0}
+</style>
+</head>
+<body>
+<header class="site-header">
+  <div class="wrap nav">
+    <a class="brand" href="<?= url('home') ?>">🛡️ CyberSafe</a>
+    <nav>
+      <a href="<?= url('modules') ?>">Learn</a>
+      <a href="<?= url('tips') ?>">Safety Tips</a>
+      <a href="<?= url('quiz') ?>">Quizzes</a>
+      <?php if (is_logged_in()): ?>
+        <a href="<?= url('my_results') ?>">My Results</a>
+        <?php if (is_admin()): ?><a href="<?= url('admin') ?>">Admin</a><?php endif; ?>
+        <span class="who">Hi, <?= e($_SESSION['name']) ?></span>
+        <a class="btn small" href="<?= url('logout') ?>">Logout</a>
+      <?php else: ?>
+        <a href="<?= url('login') ?>">Login</a>
+        <a class="btn small" href="<?= url('register') ?>">Register</a>
+      <?php endif; ?>
+    </nav>
+  </div>
+</header>
+<main class="wrap">
+<?php if ($m = flash()): ?><div class="alert"><?= e($m) ?></div><?php endif; ?>
+<?php
+}
+
+function render_footer() { ?>
+</main>
+<footer class="site-footer">
+  <div class="wrap">
+    <p>CyberSafe — Cybersecurity Awareness Website for Students.</p>
+    <p class="muted">Educational project · Practice responsible and ethical internet use.</p>
+  </div>
+</footer>
+</body>
+</html>
+<?php }
+
+/* ============================================================
+   8. START RENDERING
+   ============================================================ */
+render_header($pageTitle);
+
+/* ============================================================
+   9. VIEWS
+   ============================================================ */
+switch ($page) {
+
+/* ---------------------------------------------------------- HOME */
+case 'home':
+    $moduleCount = (int)$pdo->query('SELECT COUNT(*) FROM modules')->fetchColumn();
+    $tipCount    = (int)$pdo->query('SELECT COUNT(*) FROM tips')->fetchColumn();
+    $quizCount   = (int)$pdo->query('SELECT COUNT(*) FROM quizzes')->fetchColumn();
+    ?>
+    <section class="hero">
+      <h1>🛡️ CyberSafe</h1>
+      <p>A cybersecurity awareness website for students. Learn to spot phishing,
+         build strong passwords, protect your personal data, and use the internet
+         ethically and responsibly.</p>
+      <div class="hero-actions">
+        <a class="btn" href="<?= url('modules') ?>">Start Learning</a>
+        <a class="btn ghost" href="<?= url('quiz') ?>">Take a Quiz</a>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>What you can do here</h2>
+      <div class="grid">
+        <div class="card"><span class="icon">📚</span><h3>Learning Modules</h3>
+          <p><?= $moduleCount ?> short lessons on phishing, passwords, privacy and ethics.</p></div>
+        <div class="card"><span class="icon">💡</span><h3>Online Safety Tips</h3>
+          <p><?= $tipCount ?> quick, practical tips you can apply today.</p></div>
+        <div class="card"><span class="icon">🧠</span><h3>Interactive Quizzes</h3>
+          <p><?= $quizCount ?> quizzes with instant scoring and answer review.</p></div>
+        <div class="card"><span class="icon">📊</span><h3>Score Tracking</h3>
+          <p>Create an account to save your results and monitor your progress.</p></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Why it matters</h2>
+      <div class="grid">
+        <div class="card"><h3>Cybercrime</h3>
+          <p>Phishing, scams and identity theft often start with one careless click.</p></div>
+        <div class="card"><h3>Data Privacy</h3>
+          <p>Your personal data has value. Under RA 10173, you have rights over it.</p></div>
+        <div class="card"><h3>Professional Ethics</h3>
+          <p>IT professionals must protect users, not exploit them.</p></div>
+        <div class="card"><h3>Social Responsibility</h3>
+          <p>Responsible behaviour online protects you and everyone around you.</p></div>
+      </div>
+    </section>
+    <?php
+    break;
+
+/* ---------------------------------------------------------- REGISTER */
+case 'register':
+    if (is_logged_in()) redirect_to('home');
+    $errs = $_SESSION['register_errors'] ?? [];
+    $old  = $_SESSION['register_old']    ?? ['name' => '', 'email' => ''];
+    unset($_SESSION['register_errors'], $_SESSION['register_old']);
+    ?>
+    <h1>Create your account</h1>
+    <p class="muted">Registering lets you save quiz scores. Learning content is free for everyone.</p>
+
+    <?php if ($errs): ?>
+      <div class="errors"><ul>
+        <?php foreach ($errs as $er): ?><li><?= e($er) ?></li><?php endforeach; ?>
+      </ul></div>
+    <?php endif; ?>
+
+    <form class="form" method="post" action="<?= url('register') ?>" novalidate>
+      <?= csrf_field() ?>
+      <div class="field"><label>Full name</label>
+        <input type="text" name="name" value="<?= e($old['name']) ?>" required></div>
+      <div class="field"><label>Email address</label>
+        <input type="email" name="email" value="<?= e($old['email']) ?>" required></div>
+      <div class="field"><label>Password (minimum 8 characters)</label>
+        <input type="password" name="password" required></div>
+      <div class="field"><label>Confirm password</label>
+        <input type="password" name="password2" required></div>
+      <button class="btn" type="submit">Register</button>
+      <p class="muted" style="margin-top:14px">
+        Already have an account? <a href="<?= url('login') ?>">Log in</a>
+      </p>
+    </form>
+    <?php
+    break;
+
+/* ---------------------------------------------------------- LOGIN */
+case 'login':
+    if (is_logged_in()) redirect_to('home');
+    $err = $_SESSION['login_error'] ?? null;
+    $old = $_SESSION['login_old']   ?? '';
+    unset($_SESSION['login_error'], $_SESSION['login_old']);
+    ?>
+    <h1>Log in</h1>
+    <?php if ($err): ?><div class="errors"><ul><li><?= e($err) ?></li></ul></div><?php endif; ?>
+    <form class="form" method="post" action="<?= url('login') ?>" novalidate>
+      <?= csrf_field() ?>
+      <div class="field"><label>Email address</label>
+        <input type="email" name="email" value="<?= e($old) ?>" required></div>
+      <div class="field"><label>Password</label>
+        <input type="password" name="password" required></div>
+      <button class="btn" type="submit">Log in</button>
+      <p class="muted" style="margin-top:14px">
+        No account yet? <a href="<?= url('register') ?>">Register here</a>
+      </p>
+    </form>
+    <?php
+    break;
+
+/* ---------------------------------------------------------- MODULES */
+case 'modules':
+    $modules = $pdo->query('SELECT id, title, content FROM modules ORDER BY id')->fetchAll();
+    ?>
+    <h1>Cybersecurity Learning Modules</h1>
+    <p class="muted">Read each module, then test yourself in the quiz section.</p>
+
+    <?php if (!$modules): ?>
+      <p class="muted">No modules available yet.</p>
+    <?php else: ?>
+      <ul class="list" style="margin-top:24px">
+        <?php foreach ($modules as $i => $m): ?>
+          <li>
+            <h3><a href="<?= url('module', ['id' => (int)$m['id']]) ?>">
+              <?= ($i + 1) ?>. <?= e($m['title']) ?>
+            </a></h3>
+            <p class="muted"><?= e(mb_strimwidth(strip_tags($m['content']), 0, 140, '…')) ?></p>
+          </li>
+        <?php endforeach; ?>
+      </ul>
+    <?php endif;
+    break;
+
+/* ---------------------------------------------------------- MODULE */
+case 'module':
+    $id = (int)($_GET['id'] ?? 0);
+    $st = $pdo->prepare('SELECT * FROM modules WHERE id = ?');
+    $st->execute([$id]);
+    $module = $st->fetch();
+    if (!$module) { flash('That module could not be found.'); redirect_to('modules'); }
+    ?>
+    <p><a href="<?= url('modules') ?>">← Back to modules</a></p>
+    <h1><?= e($module['title']) ?></h1>
+    <div class="card" style="margin-top:18px;line-height:1.8">
+      <?= nl2br(e($module['content'])) ?>
+    </div>
+    <div class="hero-actions" style="margin-top:24px">
+      <a class="btn" href="<?= url('quiz') ?>">Test your knowledge</a>
+      <a class="btn ghost" href="<?= url('modules') ?>">Other modules</a>
+    </div>
+    <?php
+    break;
+
+/* ---------------------------------------------------------- TIPS */
+case 'tips':
+    $tips = $pdo->query('SELECT * FROM tips ORDER BY category, id')->fetchAll();
+    $grouped = [];
+    foreach ($tips as $t) $grouped[$t['category']][] = $t;
+    ?>
+    <h1>Online Safety Tips</h1>
+    <p class="muted">Quick, practical habits you can start using today.</p>
+    <?php if (!$grouped): ?>
+      <p class="muted">No tips available yet.</p>
+    <?php else: ?>
+      <?php foreach ($grouped as $cat => $items): ?>
+        <section class="section" style="margin-top:26px">
+          <h2><?= e($cat) ?></h2>
+          <ul class="list">
+            <?php foreach ($items as $t): ?><li><?= e($t['tip']) ?></li><?php endforeach; ?>
+          </ul>
+        </section>
+      <?php endforeach; ?>
+    <?php endif;
+    break;
+
+/* ---------------------------------------------------------- QUIZ */
+case 'quiz':
+    /* --- RESULT VIEW (after POST) --- */
+    if (isset($_GET['result']) && !empty($_SESSION['quiz_result'])):
+        $R = $_SESSION['quiz_result'];
+        unset($_SESSION['quiz_result']);
+        $quiz   = $R['quiz'];
+        $score  = $R['score'];
+        $total  = $R['total'];
+        $review = $R['review'];
+        $percent = $total > 0 ? round($score / $total * 100) : 0;
+        ?>
+        <div class="card" style="text-align:center;padding:32px">
+          <p class="muted" style="margin:0">Your score for</p>
+          <h2 style="margin:6px 0 12px"><?= e($quiz['title']) ?></h2>
+          <p class="score"><?= $score ?> / <?= $total ?></p>
+          <p style="font-size:1.15rem;margin:0"><?= $percent ?>%
+            <?php if ($percent >= 80): ?>
+              — <span class="badge ok">Excellent</span>
+            <?php elseif ($percent >= 50): ?>
+              — <span class="badge bad" style="background:rgba(245,158,11,.15);color:#ffd38a">Keep practising</span>
+            <?php else: ?>
+              — <span class="badge bad">Review the modules</span>
+            <?php endif; ?>
+          </p>
+          <p class="muted" style="margin-top:14px">
+            <?= is_logged_in()
+                ? 'Your score has been saved to My Results.'
+                : 'Log in before taking a quiz to save your score.' ?>
+          </p>
+        </div>
+
+        <section class="section" style="margin-top:26px">
+          <h2>Answer review</h2>
+          <?php foreach ($review as $i => $r): ?>
+            <div class="q" style="border-color:<?= $r['ok'] ? 'rgba(34,197,94,.45)' : 'rgba(239,68,68,.45)' ?>">
+              <p style="margin:0 0 8px;font-weight:600">
+                <?= ($i + 1) ?>. <?= e($r['q']['question']) ?>
+              </p>
+              <p style="margin:0;font-size:.92rem">
+                Your answer: <b><?= $r['given'] ? e($r['given']) : '—' ?></b>
+                <?= $r['ok'] ? '<span class="badge ok">Correct</span>' : '<span class="badge bad">Wrong</span>' ?>
+              </p>
+              <p class="muted" style="margin:6px 0 0">
+                Correct answer: <b><?= e($r['q']['correct_option']) ?>.</b>
+                <?= e($r['q']['option_' . strtolower($r['q']['correct_option'])]) ?>
+              </p>
+            </div>
+          <?php endforeach; ?>
+        </section>
+
+        <div class="hero-actions">
+          <a class="btn" href="<?= url('quiz', ['id' => (int)$quiz['id']]) ?>">Retake quiz</a>
+          <a class="btn ghost" href="<?= url('quiz') ?>">Other quizzes</a>
+          <?php if (is_logged_in()): ?>
+            <a class="btn ghost" href="<?= url('my_results') ?>">My results</a>
+          <?php endif; ?>
+        </div>
+        <?php break; endif;
+
+    /* --- TAKE A QUIZ --- */
+    if (isset($_GET['id'])):
+        $quizId = (int)$_GET['id'];
+        $st = $pdo->prepare('SELECT * FROM quizzes WHERE id = ?');
+        $st->execute([$quizId]);
+        $quiz = $st->fetch();
+        if (!$quiz) { flash('Quiz not found.'); redirect_to('quiz'); }
+        $st = $pdo->prepare('SELECT * FROM questions WHERE quiz_id = ? ORDER BY id');
+        $st->execute([$quizId]);
+        $questions = $st->fetchAll();
+        if (!$questions) { flash('This quiz has no questions yet.'); redirect_to('quiz'); }
+        ?>
+        <p><a href="<?= url('quiz') ?>">← All quizzes</a></p>
+        <h1><?= e($quiz['title']) ?></h1>
+        <p class="muted"><?= e($quiz['description']) ?></p>
+        <form method="post" action="<?= url('quiz') ?>" style="margin-top:22px">
+          <?= csrf_field() ?>
+          <input type="hidden" name="quiz_id" value="<?= (int)$quiz['id'] ?>">
+          <?php foreach ($questions as $i => $q): ?>
+            <fieldset class="q">
+              <legend><?= ($i + 1) ?>. <?= e($q['question']) ?></legend>
+              <?php foreach (['A','B','C','D'] as $opt): ?>
+                <label class="opt">
+                  <input type="radio" name="q[<?= (int)$q['id'] ?>]" value="<?= $opt ?>" required>
+                  <span><b><?= $opt ?>.</b> <?= e($q['option_' . strtolower($opt)]) ?></span>
+                </label>
+              <?php endforeach; ?>
+            </fieldset>
+          <?php endforeach; ?>
+          <button class="btn" type="submit">Submit Answers</button>
+        </form>
+        <?php break; endif;
+
+    /* --- LIST QUIZZES (default) --- */
+    $quizzes = $pdo->query(
+        'SELECT q.*, (SELECT COUNT(*) FROM questions WHERE quiz_id = q.id) AS qcount
+         FROM quizzes q ORDER BY q.id'
+    )->fetchAll();
+    ?>
+    <h1>Interactive Quizzes</h1>
+    <p class="muted">Choose a quiz to test your cybersecurity knowledge.</p>
+    <?php if (!$quizzes): ?>
+      <p class="muted">No quizzes available yet.</p>
+    <?php else: ?>
+      <ul class="list" style="margin-top:24px">
+        <?php foreach ($quizzes as $q): ?>
+          <li>
+            <h3><?= e($q['title']) ?></h3>
+            <p class="muted"><?= e($q['description']) ?> · <?= (int)$q['qcount'] ?> questions</p>
+            <?php if ($q['qcount'] > 0): ?>
+              <p style="margin-top:12px">
+                <a class="btn small" href="<?= url('quiz', ['id' => (int)$q['id']]) ?>">Start quiz</a>
+              </p>
+            <?php else: ?>
+              <p class="muted" style="margin-top:12px">Coming soon.</p>
+            <?php endif; ?>
+          </li>
+        <?php endforeach; ?>
+      </ul>
+    <?php endif;
+    break;
+
+/* ---------------------------------------------------------- MY RESULTS */
+case 'my_results':
+    require_login();
+    $st = $pdo->prepare(
+        'SELECT r.*, q.title FROM results r
+         JOIN quizzes q ON q.id = r.quiz_id
+         WHERE r.user_id = ? ORDER BY r.taken_at DESC'
+    );
+    $st->execute([$_SESSION['user_id']]);
+    $rows = $st->fetchAll();
+    ?>
+    <h1>My Quiz Results</h1>
+    <?php if (!$rows): ?>
+      <p class="muted">You have not taken any quizzes yet.
+        <a href="<?= url('quiz') ?>">Take your first quiz →</a></p>
+    <?php else: ?>
+      <table style="margin-top:20px">
+        <thead><tr><th>Quiz</th><th>Score</th><th>Percentage</th><th>Date taken</th></tr></thead>
+        <tbody>
+          <?php foreach ($rows as $r):
+            $pct = $r['total'] > 0 ? round($r['score'] / $r['total'] * 100) : 0; ?>
+            <tr>
+              <td><?= e($r['title']) ?></td>
+              <td><?= (int)$r['score'] ?> / <?= (int)$r['total'] ?></td>
+              <td><?= $pct ?>%</td>
+              <td class="muted"><?= e(date('M d, Y g:i A', strtotime($r['taken_at']))) ?></td>
+            </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+    <?php endif;
+    break;
+
+/* ---------------------------------------------------------- ADMIN: DASHBOARD */
+case 'admin':
+    require_admin();
+    $stats = [
+        'Students'  => (int)$pdo->query("SELECT COUNT(*) FROM users WHERE role='student'")->fetchColumn(),
+        'Modules'   => (int)$pdo->query('SELECT COUNT(*) FROM modules')->fetchColumn(),
+        'Tips'      => (int)$pdo->query('SELECT COUNT(*) FROM tips')->fetchColumn(),
+        'Quizzes'   => (int)$pdo->query('SELECT COUNT(*) FROM quizzes')->fetchColumn(),
+        'Questions' => (int)$pdo->query('SELECT COUNT(*) FROM questions')->fetchColumn(),
+        'Attempts'  => (int)$pdo->query('SELECT COUNT(*) FROM results')->fetchColumn(),
+    ];
+    ?>
+    <h1>Admin Dashboard</h1>
+    <p class="muted">Manage the educational content of CyberSafe.</p>
+    <div class="admin-nav" style="margin-top:20px">
+      <a href="<?= url('admin') ?>">Dashboard</a>
+      <a href="<?= url('admin_modules') ?>">Modules</a>
+      <a href="<?= url('admin_tips') ?>">Tips</a>
+      <a href="<?= url('admin_quizzes') ?>">Quizzes</a>
+    </div>
+    <div class="grid">
+      <?php foreach ($stats as $label => $value): ?>
+        <div class="card" style="text-align:center">
+          <p style="font-size:2rem;font-weight:800;margin:0;color:var(--accent)"><?= $value ?></p>
+          <p class="muted" style="margin:0"><?= e($label) ?></p>
+        </div>
+      <?php endforeach; ?>
+    </div>
+    <?php
+    break;
+
+/* ---------------------------------------------------------- ADMIN: MODULES */
+case 'admin_modules':
+    require_admin();
+    $editing = null;
+    if (isset($_GET['edit'])) {
+        $st = $pdo->prepare('SELECT * FROM modules WHERE id = ?');
+        $st->execute([(int)$_GET['edit']]);
+        $editing = $st->fetch();
+    }
+    $modules = $pdo->query('SELECT * FROM modules ORDER BY id DESC')->fetchAll();
+    ?>
+    <div class="admin-nav">
+      <a href="<?= url('admin') ?>">Dashboard</a>
+      <a href="<?= url('admin_modules') ?>">Modules</a>
+      <a href="<?= url('admin_tips') ?>">Tips</a>
+      <a href="<?= url('admin_quizzes') ?>">Quizzes</a>
+    </div>
+    <h1><?= $editing ? 'Edit Module' : 'Add Module' ?></h1>
+    <form class="form" method="post" action="<?= url('admin_modules') ?>" style="margin-bottom:34px">
+      <?= csrf_field() ?>
+      <input type="hidden" name="action" value="save">
+      <input type="hidden" name="id" value="<?= $editing ? (int)$editing['id'] : 0 ?>">
+      <div class="field"><label>Title</label>
+        <input type="text" name="title" value="<?= e($editing['title'] ?? '') ?>" required></div>
+      <div class="field"><label>Content (blank line = new paragraph)</label>
+        <textarea name="content" required><?= e($editing['content'] ?? '') ?></textarea></div>
+      <button class="btn" type="submit"><?= $editing ? 'Update Module' : 'Add Module' ?></button>
+      <?php if ($editing): ?>
+        <a class="btn ghost" href="<?= url('admin_modules') ?>">Cancel</a>
+      <?php endif; ?>
+    </form>
+
+    <h2>Existing Modules (<?= count($modules) ?>)</h2>
+    <table>
+      <thead><tr><th>Title</th><th>Created</th><th style="width:190px">Actions</th></tr></thead>
+      <tbody>
+        <?php foreach ($modules as $m): ?>
+          <tr>
+            <td><?= e($m['title']) ?></td>
+            <td class="muted"><?= e(date('M d, Y', strtotime($m['created_at']))) ?></td>
+            <td>
+              <a class="btn small ghost"
+                 href="<?= url('admin_modules', ['edit' => (int)$m['id']]) ?>">Edit</a>
+              <form method="post" action="<?= url('admin_modules') ?>" style="display:inline"
+                    onsubmit="return confirm('Delete this module?')">
+                <?= csrf_field() ?>
+                <input type="hidden" name="action" value="delete">
+                <input type="hidden" name="id" value="<?= (int)$m['id'] ?>">
+                <button class="btn small danger" type="submit">Delete</button>
+              </form>
+            </td>
+          </tr>
+        <?php endforeach; ?>
+        <?php if (!$modules): ?>
+          <tr><td colspan="3" class="muted">No modules yet.</td></tr>
+        <?php endif; ?>
+      </tbody>
+    </table>
+    <?php
+    break;
+
+/* ---------------------------------------------------------- ADMIN: TIPS */
+case 'admin_tips':
+    require_admin();
+    $editing = null;
+    if (isset($_GET['edit'])) {
+        $st = $pdo->prepare('SELECT * FROM tips WHERE id = ?');
+        $st->execute([(int)$_GET['edit']]);
+        $editing = $st->fetch();
+    }
+    $tips = $pdo->query('SELECT * FROM tips ORDER BY category, id')->fetchAll();
+    ?>
+    <div class="admin-nav">
+      <a href="<?= url('admin') ?>">Dashboard</a>
+      <a href="<?= url('admin_modules') ?>">Modules</a>
+      <a href="<?= url('admin_tips') ?>">Tips</a>
+      <a href="<?= url('admin_quizzes') ?>">Quizzes</a>
+    </div>
+    <h1><?= $editing ? 'Edit Tip' : 'Add Tip' ?></h1>
+    <form class="form" method="post" action="<?= url('admin_tips') ?>" style="margin-bottom:34px">
+      <?= csrf_field() ?>
+      <input type="hidden" name="action" value="save">
+      <input type="hidden" name="id" value="<?= $editing ? (int)$editing['id'] : 0 ?>">
+      <div class="field"><label>Category</label>
+        <input type="text" name="category" value="<?= e($editing['category'] ?? '') ?>"
+               placeholder="Password Safety / Privacy / Browsing / Social Media / Scams" required></div>
+      <div class="field"><label>Tip</label>
+        <textarea name="tip" style="min-height:90px" required><?= e($editing['tip'] ?? '') ?></textarea></div>
+      <button class="btn" type="submit"><?= $editing ? 'Update Tip' : 'Add Tip' ?></button>
+      <?php if ($editing): ?>
+        <a class="btn ghost" href="<?= url('admin_tips') ?>">Cancel</a>
+      <?php endif; ?>
+    </form>
+
+    <h2>Existing Tips (<?= count($tips) ?>)</h2>
+    <table>
+      <thead><tr><th>Category</th><th>Tip</th><th style="width:190px">Actions</th></tr></thead>
+      <tbody>
+        <?php foreach ($tips as $t): ?>
+          <tr>
+            <td><?= e($t['category']) ?></td>
+            <td><?= e($t['tip']) ?></td>
+            <td>
+              <a class="btn small ghost"
+                 href="<?= url('admin_tips', ['edit' => (int)$t['id']]) ?>">Edit</a>
+              <form method="post" action="<?= url('admin_tips') ?>" style="display:inline"
+                    onsubmit="return confirm('Delete this tip?')">
+                <?= csrf_field() ?>
+                <input type="hidden" name="action" value="delete">
+                <input type="hidden" name="id" value="<?= (int)$t['id'] ?>">
+                <button class="btn small danger" type="submit">Delete</button>
+              </form>
+            </td>
+          </tr>
+        <?php endforeach; ?>
+        <?php if (!$tips): ?>
+          <tr><td colspan="3" class="muted">No tips yet.</td></tr>
+        <?php endif; ?>
+      </tbody>
+    </table>
+    <?php
+    break;
+
+/* ---------------------------------------------------------- ADMIN: QUIZZES */
+case 'admin_quizzes':
+    require_admin();
+    $editing = null;
+    if (isset($_GET['edit'])) {
+        $st = $pdo->prepare('SELECT * FROM quizzes WHERE id = ?');
+        $st->execute([(int)$_GET['edit']]);
+        $editing = $st->fetch();
+    }
+    $quizzes = $pdo->query(
+        'SELECT q.*, (SELECT COUNT(*) FROM questions WHERE quiz_id = q.id) AS qcount
+         FROM quizzes q ORDER BY q.id DESC'
+    )->fetchAll();
+    ?>
+    <div class="admin-nav">
+      <a href="<?= url('admin') ?>">Dashboard</a>
+      <a href="<?= url('admin_modules') ?>">Modules</a>
+      <a href="<?= url('admin_tips') ?>">Tips</a>
+      <a href="<?= url('admin_quizzes') ?>">Quizzes</a>
+    </div>
+    <h1><?= $editing ? 'Edit Quiz' : 'Add Quiz' ?></h1>
+    <form class="form" method="post" action="<?= url('admin_quizzes') ?>" style="margin-bottom:34px">
+      <?= csrf_field() ?>
+      <input type="hidden" name="action" value="save">
+      <input type="hidden" name="id" value="<?= $editing ? (int)$editing['id'] : 0 ?>">
+      <div class="field"><label>Quiz title</label>
+        <input type="text" name="title" value="<?= e($editing['title'] ?? '') ?>" required></div>
+      <div class="field"><label>Short description</label>
+        <input type="text" name="description" value="<?= e($editing['description'] ?? '') ?>"></div>
+      <button class="btn" type="submit"><?= $editing ? 'Update Quiz' : 'Add Quiz' ?></button>
+      <?php if ($editing): ?>
+        <a class="btn ghost" href="<?= url('admin_quizzes') ?>">Cancel</a>
+      <?php endif; ?>
+    </form>
+
+    <h2>Existing Quizzes (<?= count($quizzes) ?>)</h2>
+    <table>
+      <thead><tr><th>Title</th><th>Questions</th><th style="width:270px">Actions</th></tr></thead>
+      <tbody>
+        <?php foreach ($quizzes as $q): ?>
+          <tr>
+            <td><b><?= e($q['title']) ?></b><br>
+                <span class="muted"><?= e($q['description']) ?></span></td>
+            <td><?= (int)$q['qcount'] ?></td>
+            <td>
+              <a class="btn small"
+                 href="<?= url('admin_questions', ['quiz_id' => (int)$q['id']]) ?>">Questions</a>
+              <a class="btn small ghost"
+                 href="<?= url('admin_quizzes', ['edit' => (int)$q['id']]) ?>">Edit</a>
+              <form method="post" action="<?= url('admin_quizzes') ?>" style="display:inline"
+                    onsubmit="return confirm('Delete this quiz and all its questions?')">
+                <?= csrf_field() ?>
+                <input type="hidden" name="action" value="delete">
+                <input type="hidden" name="id" value="<?= (int)$q['id'] ?>">
+                <button class="btn small danger" type="submit">Delete</button>
+              </form>
+            </td>
+          </tr>
+        <?php endforeach; ?>
+        <?php if (!$quizzes): ?>
+          <tr><td colspan="3" class="muted">No quizzes yet.</td></tr>
+        <?php endif; ?>
+      </tbody>
+    </table>
+    <?php
+    break;
+
+/* ---------------------------------------------------------- ADMIN: QUESTIONS */
+case 'admin_questions':
+    require_admin();
+    $quizId = (int)($_GET['quiz_id'] ?? 0);
+    $st = $pdo->prepare('SELECT * FROM quizzes WHERE id = ?');
+    $st->execute([$quizId]);
+    $quiz = $st->fetch();
+    if (!$quiz) { flash('Quiz not found.'); redirect_to('admin_quizzes'); }
+
+    $editing = null;
+    if (isset($_GET['edit'])) {
+        $st = $pdo->prepare('SELECT * FROM questions WHERE id = ? AND quiz_id = ?');
+        $st->execute([(int)$_GET['edit'], $quizId]);
+        $editing = $st->fetch();
+    }
+    $st = $pdo->prepare('SELECT * FROM questions WHERE quiz_id = ? ORDER BY id');
+    $st->execute([$quizId]);
+    $questions = $st->fetchAll();
+    ?>
+    <div class="admin-nav">
+      <a href="<?= url('admin') ?>">Dashboard</a>
+      <a href="<?= url('admin_modules') ?>">Modules</a>
+      <a href="<?= url('admin_tips') ?>">Tips</a>
+      <a href="<?= url('admin_quizzes') ?>">Quizzes</a>
+    </div>
+    <p><a href="<?= url('admin_quizzes') ?>">← Back to quizzes</a></p>
+    <h1><?= e($quiz['title']) ?> — Questions</h1>
+
+    <h2><?= $editing ? 'Edit Question' : 'Add Question' ?></h2>
+    <form class="form" method="post" action="<?= url('admin_questions') ?>" style="margin-bottom:34px">
+      <?= csrf_field() ?>
+      <input type="hidden" name="action" value="save">
+      <input type="hidden" name="quiz_id" value="<?= $quizId ?>">
+      <input type="hidden" name="id" value="<?= $editing ? (int)$editing['id'] : 0 ?>">
+      <div class="field"><label>Question</label>
+        <textarea name="question" style="min-height:80px" required><?= e($editing['question'] ?? '') ?></textarea></div>
+      <?php foreach (['A','B','C','D'] as $opt): ?>
+        <div class="field"><label>Option <?= $opt ?></label>
+          <input type="text" name="option_<?= strtolower($opt) ?>"
+                 value="<?= e($editing['option_' . strtolower($opt)] ?? '') ?>" required></div>
+      <?php endforeach; ?>
+      <div class="field"><label>Correct answer</label>
+        <select name="correct_option" required>
+          <?php foreach (['A','B','C','D'] as $opt): ?>
+            <option value="<?= $opt ?>"
+              <?= ($editing['correct_option'] ?? 'A') === $opt ? 'selected' : '' ?>><?= $opt ?></option>
+          <?php endforeach; ?>
+        </select></div>
+      <button class="btn" type="submit"><?= $editing ? 'Update Question' : 'Add Question' ?></button>
+      <?php if ($editing): ?>
+        <a class="btn ghost"
+           href="<?= url('admin_questions', ['quiz_id' => $quizId]) ?>">Cancel</a>
+      <?php endif; ?>
+    </form>
+
+    <h2>Existing Questions (<?= count($questions) ?>)</h2>
+    <?php foreach ($questions as $i => $q): ?>
+      <div class="q">
+        <p style="margin:0 0 8px;font-weight:600"><?= ($i + 1) ?>. <?= e($q['question']) ?></p>
+        <p class="muted" style="margin:0;font-size:.9rem">
+          A. <?= e($q['option_a']) ?> · B. <?= e($q['option_b']) ?> ·
+          C. <?= e($q['option_c']) ?> · D. <?= e($q['option_d']) ?>
+        </p>
+        <p style="margin:8px 0 10px">
+          <span class="badge ok">Correct: <?= e($q['correct_option']) ?></span>
+        </p>
+        <a class="btn small ghost"
+           href="<?= url('admin_questions', ['quiz_id' => $quizId, 'edit' => (int)$q['id']]) ?>">Edit</a>
+        <form method="post" action="<?= url('admin_questions') ?>" style="display:inline"
+              onsubmit="return confirm('Delete this question?')">
+          <?= csrf_field() ?>
+          <input type="hidden" name="action" value="delete">
+          <input type="hidden" name="quiz_id" value="<?= $quizId ?>">
+          <input type="hidden" name="id" value="<?= (int)$q['id'] ?>">
+          <button class="btn small danger" type="submit">Delete</button>
+        </form>
+      </div>
+    <?php endforeach; ?>
+    <?php if (!$questions): ?>
+      <p class="muted">No questions yet. Add your first one above.</p>
+    <?php endif;
+    break;
+
+/* ---------------------------------------------------------- FALLBACK */
+default:
+    flash('Page not found.');
+    redirect_to('home');
+}
+
+/* ============================================================
+   10. RENDER FOOTER
+   ============================================================ */
+render_footer();
